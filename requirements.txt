@@ -1,5 +1,8 @@
-streamlit
-ultralytics
+ultralytics==8.2.0
+torch
+torchvision
 opencv-python-headless
+gradio
+pandas
 numpy
 Pillow
