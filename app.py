@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from PIL import Image
+import tempfile
 
 # -----------------------------
 # PAGE CONFIG
@@ -13,13 +14,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("🚗 EV Smart Parking – Slot Occupancy Detection")
-st.write(
-    """
-    This application detects **parking slot occupancy** using a trained YOLOv8 model.
-    It is designed for **industry-scale smart parking systems**.
-    """
-)
+st.title("EV Smart Parking – Slot Occupancy Detection")
+st.write("Image and Video based parking slot occupancy detection using YOLOv8")
 
 # -----------------------------
 # LOAD MODEL
@@ -31,85 +27,87 @@ def load_model():
 model = load_model()
 
 # -----------------------------
-# FILE UPLOAD
+# MODE SELECTION
 # -----------------------------
-uploaded_file = st.file_uploader(
-    "Upload a parking lot image",
-    type=["jpg", "jpeg", "png"]
-)
+mode = st.radio("Select Input Type", ["Image", "Video"])
 
-if uploaded_file is not None:
-    # Read image
-    image = Image.open(uploaded_file).convert("RGB")
-    img_array = np.array(image)
+# =====================================================
+# IMAGE MODE
+# =====================================================
+if mode == "Image":
+    uploaded_file = st.file_uploader("Upload parking image", type=["jpg", "png", "jpeg"])
 
-    st.subheader("📥 Input Image")
-    st.image(image, use_column_width=True)
+    if uploaded_file:
+        image = Image.open(uploaded_file).convert("RGB")
+        img_array = np.array(image)
 
-    # -----------------------------
-    # RUN INFERENCE
-    # -----------------------------
-    with st.spinner("Detecting parking slots..."):
-        results = model.predict(
-            source=img_array,
-            conf=0.25,
-            save=False
-        )
+        results = model.predict(img_array, conf=0.25)
+        result = results[0]
 
-    result = results[0]
+        annotated = result.plot()
+        annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
 
-    # -----------------------------
-    # PROCESS RESULTS
-    # -----------------------------
-    boxes = result.boxes
-    class_names = model.names
+        class_names = model.names
+        counts = {"space-empty": 0, "space-occupied": 0}
 
-    counts = {"space-empty": 0, "space-occupied": 0}
+        for cls in result.boxes.cls:
+            label = class_names[int(cls)]
+            if label in counts:
+                counts[label] += 1
 
-    for cls in boxes.cls:
-        label = class_names[int(cls)]
-        if label in counts:
-            counts[label] += 1
+        st.image(annotated, caption="Detection Output", use_column_width=True)
 
-    total_slots = counts["space-empty"] + counts["space-occupied"]
+        df = pd.DataFrame({
+            "Status": ["Empty", "Occupied"],
+            "Count": [counts["space-empty"], counts["space-occupied"]]
+        })
+        st.table(df)
 
-    # -----------------------------
-    # DRAW OUTPUT IMAGE
-    # -----------------------------
-    annotated_img = result.plot()
-    annotated_img = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+# =====================================================
+# VIDEO MODE
+# =====================================================
+if mode == "Video":
+    uploaded_video = st.file_uploader("Upload parking CCTV video", type=["mp4", "avi", "mov"])
 
-    st.subheader("📊 Detection Output")
-    st.image(annotated_img, use_column_width=True)
+    if uploaded_video:
+        tfile = tempfile.NamedTemporaryFile(delete=False)
+        tfile.write(uploaded_video.read())
 
-    # -----------------------------
-    # SUMMARY METRICS
-    # -----------------------------
-    col1, col2, col3 = st.columns(3)
+        cap = cv2.VideoCapture(tfile.name)
+        stframe = st.empty()
 
-    col1.metric("Total Slots", total_slots)
-    col2.metric("Empty Slots", counts["space-empty"])
-    col3.metric("Occupied Slots", counts["space-occupied"])
+        empty_count = 0
+        occupied_count = 0
 
-    # -----------------------------
-    # TABLE VIEW (INDUSTRY LIKES THIS)
-    # -----------------------------
-    st.subheader("📋 Slot Occupancy Summary")
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-    df = pd.DataFrame({
-        "Slot Status": ["Empty", "Occupied"],
-        "Count": [counts["space-empty"], counts["space-occupied"]]
-    })
+            results = model.predict(frame, conf=0.25, verbose=False)
+            result = results[0]
 
-    st.table(df)
+            annotated = result.plot()
 
-    # -----------------------------
-    # FOOTER NOTE
-    # -----------------------------
-    st.info(
-        "This model was trained offline and deployed for real-time inference. "
-        "Future extensions include EV charging port health monitoring and video analytics."
-    )
+            class_names = model.names
+            empty_count = 0
+            occupied_count = 0
 
-else:
-    st.warning("Please upload a parking lot image to start detection.")
+            for cls in result.boxes.cls:
+                label = class_names[int(cls)]
+                if label == "space-empty":
+                    empty_count += 1
+                elif label == "space-occupied":
+                    occupied_count += 1
+
+            annotated = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+            stframe.image(annotated, use_column_width=True)
+
+        cap.release()
+
+        st.subheader("Final Slot Count")
+        df = pd.DataFrame({
+            "Status": ["Empty", "Occupied"],
+            "Count": [empty_count, occupied_count]
+        })
+        st.table(df)
