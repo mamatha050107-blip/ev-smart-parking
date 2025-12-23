@@ -1,10 +1,8 @@
 import streamlit as st
 from ultralytics import YOLO
-import cv2
-import numpy as np
-import pandas as pd
 from PIL import Image
-import tempfile
+import numpy as np
+
 
 # -----------------------------
 # PAGE CONFIG
@@ -111,3 +109,4 @@ if mode == "Video":
             "Count": [empty_count, occupied_count]
         })
         st.table(df)
+
